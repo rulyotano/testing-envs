@@ -1,0 +1,2 @@
+# Testing Environments
+This project is framework to create dynamic testing environment that helps to boost companies development - testing - deployment process. Uses Docker and K8s as pillars, which is standard in modern software engineering companies. Right now it is a work in development.
