@@ -1,0 +1,103 @@
+# Cursor Rules — Testing Environments (Go)
+
+## Context
+
+Go web app: manage Docker/K8s testing environments. Auth + per-user CRUD permissions.
+
+## Layer Structure
+
+```
+domain/         entities, errors, repository interfaces  (no external deps)
+application/    use-case services, DTOs, orchestrator interfaces
+infrastructure/ DB, K8s, Docker implementations
+presentation/   HTTP handlers, middleware, router
+```
+
+Dependency rule: `presentation → application → domain`. `infrastructure → domain + application`. Never reverse.
+
+## Code Generation Rules
+
+### Always
+
+- Wrap errors: `fmt.Errorf("context: %w", err)`
+- First arg `ctx context.Context` on IO functions
+- Table-driven tests for new logic
+- Thin handlers — decode request, call service, encode response
+- Declare interfaces where consumed, not where implemented
+- Use `errors.Is` / `errors.As` for error checks
+
+### Never
+
+- `panic` outside main init
+- Global mutable state
+- Business logic in `presentation/`
+- K8s/Docker calls outside `infrastructure/`
+- Skip error checks (including `defer f.Close()`)
+- Stutter in names (`env.EnvService` → `env.Service`)
+- Inner layer importing outer layer
+
+## New Code Checklist
+
+| What | Where |
+|------|-------|
+| New entity | `internal/domain/` |
+| New use case | `internal/application/` |
+| New repository interface | `internal/domain/` |
+| New orchestrator interface | `internal/application/` |
+| New DB implementation | `internal/infrastructure/` |
+| New K8s/Docker impl | `internal/infrastructure/` |
+| New HTTP handler | `internal/presentation/` |
+
+## Test Pattern
+
+```go
+func TestFoo(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   SomeType
+        want    SomeResult
+        wantErr error
+    }{
+        {"valid input", validInput, expectedResult, nil},
+        {"invalid input", badInput, nil, ErrInvalidInput},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := Foo(tt.input)
+            require.ErrorIs(t, err, tt.wantErr)
+            assert.Equal(t, tt.want, got)
+        })
+    }
+}
+```
+
+## HTTP Handler Pattern
+
+```go
+func (h *Handler) CreateEnvironment(w http.ResponseWriter, r *http.Request) {
+    var req CreateEnvironmentRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        respondError(w, http.StatusBadRequest, "invalid request body")
+        return
+    }
+    env, err := h.service.CreateEnvironment(r.Context(), req)
+    if err != nil {
+        respondErr(w, err) // maps domain errors to HTTP status
+        return
+    }
+    respond(w, http.StatusCreated, env)
+}
+```
+
+## Domain Error → HTTP Status Map
+
+```
+ErrNotFound       → 404
+ErrUnauthorized   → 403
+ErrInvalidInput   → 400
+all others        → 500
+```
+
+## Linting
+
+After each change: `go vet ./...` and `golangci-lint run`
